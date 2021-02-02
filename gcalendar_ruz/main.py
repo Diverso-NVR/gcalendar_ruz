@@ -57,9 +57,9 @@ class CalendarManager:
                 event = await self.post_lesson(lesson, erudite_lesson["id"], self.ruz.calendar)
                 time.sleep(0.6)
 
-            if lesson["ruz_auditorium"] in offline_rooms:
-                room = self.session.query(Room).filter_by(name=lesson["ruz_auditorium"]).first()
-                self.create_record(room, event)
+                if lesson["ruz_auditorium"] in offline_rooms:
+                    room = self.session.query(Room).filter_by(name=lesson["ruz_auditorium"]).first()
+                    self.create_record(room, event)
 
         elif lesson["ruz_url"] is not None and "meet.miem.hse.ru" in lesson["ruz_url"]:
             logger.info("Adding jitsi lesson")

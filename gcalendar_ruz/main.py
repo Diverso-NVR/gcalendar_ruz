@@ -53,7 +53,7 @@ class CalendarManager:
             data = await self.test_post_lesson(lesson)
             code = data[0]
             erudite_lesson = data[1]
-            if code == 201 or code == 409:
+            if code == 201:
                 event = await self.post_lesson(lesson, erudite_lesson["id"], self.ruz.calendar)
                 time.sleep(0.6)
 
@@ -66,7 +66,7 @@ class CalendarManager:
             data = await self.test_post_lesson(lesson)
             code = data[0]
             erudite_lesson = data[1]
-            if code == 201 or code == 409:
+            if code == 201:
                 event = await self.post_lesson(lesson, erudite_lesson["id"], self.jitsi.calendar)
 
     async def update_lesson(self, lesson: dict, offline_rooms: list, lesson_id: str, event_id: str):

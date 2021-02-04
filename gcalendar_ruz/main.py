@@ -18,17 +18,17 @@ class CalendarManager:
         self.calendar_api = GCalendar()
 
         self.ruz = self.session.query(OnlineRoom).filter_by(name="РУЗ").first()
+        self.offline_rooms = [room.name for room in self.session.query(Room).all()]
 
     def __del__(self):
         self.session.close()
 
     async def get_rooms(self):
-        offline_rooms = [room.name for room in self.session.query(Room).all()]
 
         rooms = await self.ruz_api.get_auditoriumoid()
 
         tasks = [
-            self.synchronize_lessons_in_room(room["auditoriumOid"], offline_rooms, room["number"])
+            self.synchronize_lessons_in_room(room["auditoriumOid"], room["number"])
             for room in rooms
         ]
 
@@ -38,7 +38,7 @@ class CalendarManager:
             f"Created events for {datetime.today().date() + timedelta(days=1)} - {datetime.today().date() + timedelta(days=self.ruz_api.period)}"
         )
 
-    async def synchronize_lessons_in_room(self, room_id: str, offline_rooms: list, room_name: str):
+    async def synchronize_lessons_in_room(self, room_id: str, room_name: str):
         lessons = await self.get_lessons_from_room(room_id)
 
         if lessons:
@@ -49,15 +49,14 @@ class CalendarManager:
                 """
             )
             # Deletes lessons from Erudite if it doesn't exist in Ruz
+            # TODO: delete records in postgresql
             await self.nvr_api.check_delete_Erudite_lessons(lessons, room_id)
             time.sleep(0.2)
 
             for i in range(0, len(lessons), 10):
                 chunk = lessons[i : i + 10]
 
-                tasks = [
-                    self.synchronize_lesson(room_id, lesson, offline_rooms) for lesson in chunk
-                ]
+                tasks = [self.synchronize_lesson(lesson) for lesson in chunk]
                 await asyncio.gather(*tasks)
 
     async def get_lessons_from_room(self, room_id: str) -> list:
@@ -66,58 +65,57 @@ class CalendarManager:
         try:
             lessons = await self.ruz_api.get_lessons(room_id)
         except Exception as err:
-            lessons = None
+            lessons = []
             logger.error(err)
 
         return lessons
 
     async def synchronize_lesson(
         self,
-        room_id: str,
         lesson: dict,
-        offline_rooms: list,
     ):
-        check_data = await self.nvr_api.check_lesson(lesson)
-        status = check_data[0]
+        status, lesson_id, event_id = await self.nvr_api.check_lesson(lesson)
 
         # Lesson not found in Erudite, so we add it
         if status == "Not found":
-            await self.add_lesson(lesson, offline_rooms)
+            await self.add_lesson(lesson)
 
         # Lesson found in Erudite, but the data of this lesson has to be updated
         elif status == "Update":
-            lesson_id = check_data[1]
-            event_id = check_data[2]
-            await self.update_lesson(lesson, offline_rooms, lesson_id, event_id)
+            await self.update_lesson(lesson, lesson_id, event_id)
             time.sleep(0.6)
 
-    async def add_lesson(self, lesson: dict, offline_rooms: list):
+    async def add_lesson(self, lesson: dict):
         """ Adds lesson to Erudite and Google Calendar """
 
         logger.info("Trying to add lesson")
-        data = await self.test_post_lesson(lesson)
-        code = data[0]
-        erudite_lesson = data[1]
+        code, erudite_lesson = await self.test_post_lesson(lesson)
         if code == 201:
-            event = await self.post_lesson(lesson, erudite_lesson["id"], self.ruz.calendar)
+            event = await self.post_lesson(
+                lesson, erudite_lesson["id"], self.ruz.calendar
+            )
             time.sleep(0.6)
 
-            if lesson["ruz_auditorium"] in offline_rooms:
-                room = self.session.query(Room).filter_by(name=lesson["ruz_auditorium"]).first()
+            if lesson["ruz_auditorium"] in self.offline_rooms:
+                room = (
+                    self.session.query(Room)
+                    .filter_by(name=lesson["ruz_auditorium"])
+                    .first()
+                )
                 self.create_record(room, event)
 
-    async def update_lesson(self, lesson: dict, offline_rooms: list, lesson_id: str, event_id: str):
+    async def update_lesson(self, lesson: dict, lesson_id: str, event_id: str):
         """ Updates lesson in Erudite and Google Calendar """
 
         logger.info("Updating ruz lesson")
-        event = await self.calendar_api.update_event(self.ruz.calendar, event_id, lesson)
+        event = await self.calendar_api.update_event(
+            self.ruz.calendar, event_id, lesson
+        )
         lesson["gcalendar_event_id"] = event["id"]
         lesson["gcalendar_calendar_id"] = self.ruz.calendar
         await self.nvr_api.update_lesson(lesson_id, lesson)
 
-        # if lesson["ruz_auditorium"] in offline_rooms:
-        #     room = self.session.query(Room).filter_by(name=lesson["ruz_auditorium"]).first()
-        #     self.create_record(room, event)
+        # TODO: Update record in NVR postgresql
 
     async def test_post_lesson(self, lesson: dict):
         """ Post a lesson with empty event_id """
@@ -127,9 +125,7 @@ class CalendarManager:
         lesson["gcalendar_event_id"] = ""
         lesson["gcalendar_calendar_id"] = ""
 
-        data = await self.nvr_api.add_lesson(lesson)
-
-        return data
+        return await self.nvr_api.add_lesson(lesson)
 
     async def post_lesson(self, lesson: dict, lesson_id: str, calendar_id: str):
         """ Posts event to Google calendar and updates lesson in Erudite """
@@ -148,7 +144,9 @@ class CalendarManager:
         if start_date != end_date:
             return
 
-        creator = self.session.query(User).filter_by(email=event["creator"]["email"]).first()
+        creator = (
+            self.session.query(User).filter_by(email=event["creator"]["email"]).first()
+        )
         if not creator:
             return
 
@@ -176,8 +174,7 @@ async def main():
     await redis_connect()
     manager = CalendarManager()
 
-    # await manager.get_rooms()
-    await manager.delete_online_events()
+    await manager.get_rooms()
 
 
 if __name__ == "__main__":

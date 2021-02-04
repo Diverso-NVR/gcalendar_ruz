@@ -63,7 +63,7 @@ class Nvr_Api:
         else:
             logger.error("Lesson could not be added to Erudite properly")
 
-        return [res.status, data]
+        return res.status, data
 
     @semlock
     async def delete_lesson(self, lesson_id: str):
@@ -140,17 +140,6 @@ class Nvr_Api:
             return []
 
     @semlock
-    async def delete_copies(self, data: list) -> dict:
-        """ Checks if a list of lessons is longer than 1 and if it is, deletes all but one lessons from the list """
-
-        if len(data) > 1:
-            data_del = data[1:]
-            for i in data_del:
-                await self.delete_lesson(i["id"])
-
-        return data[0]
-
-    @semlock
     async def check_lesson(self, lesson: dict) -> list:
         """ Compares two lessons """
 
@@ -158,15 +147,13 @@ class Nvr_Api:
 
         # No lesson found in Erudite, so it needs to be added
         if data is False:
-            return ["Not found"]
-
-        data = await self.delete_copies(data)
+            return "Not found", None, None
 
         lesson_id = data.pop("id")
         event_id = data.pop("gcalendar_event_id")
         data.pop("gcalendar_calendar_id")
         if data == lesson:
-            return ["Same"]
+            return "Same", None, None
 
         # If code run up to this point, it means that lesson with such ruz_lesson_oid is found in Erudite, but it differs from the one in RUZ, so it needs to be updated
         return "Update", lesson_id, event_id

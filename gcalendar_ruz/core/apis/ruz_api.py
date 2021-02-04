@@ -53,53 +53,62 @@ class RuzApi:
         async with ClientSession() as session:
             res = await session.get(f"{self.url}/lessons", params=params)
             async with res:
-                res = await res.json(content_type=None)
+                data = await res.json(content_type=None)
 
-        lessons = []
-        for class_ in res:
-            lesson = {}
-
-            date = class_.pop("date")
-            date = date.split(".")
-            lesson["date"] = "-".join(date)
-
-            lesson["start_time"] = class_.pop("beginLesson")
-            lesson["end_time"] = class_.pop("endLesson")
-
-            lesson["summary"] = class_["discipline"]
-            lesson["location"] = f"{class_['auditorium']}/{class_['building']}"
-
-            for key in class_:
-                new_key = f"ruz_{camel_to_snake(key)}"
-                lesson[new_key] = class_[key]
-
-            lesson["ruz_url"] = lesson["ruz_url1"]
-
-            if lesson["ruz_group"] is not None:
-                stream = lesson["ruz_group"].split("#")[0]
-                grp_emails = await self.nvr_api.get_course_emails(stream)
-                if grp_emails != []:
-                    lesson["grp_emails"] = []  # grp_emails
-                else:
-                    logger.warning(f"Stream: {stream} has no groups")
-            else:
-                stream = ""
-            lesson["course_code"] = stream
-
-            lesson["description"] = (
-                f"Поток: {stream}\n"
-                f"Преподаватель: {lesson['ruz_lecturer']}\n"
-                f"Тип занятия: {lesson['ruz_kind_of_work']}\n"
-            )
-
-            if lesson["ruz_url"]:
-                lesson["description"] += f"URL: {lesson['ruz_url']}\n"
-
-            if lesson.get("ruz_lecturer_email"):  # None or ""
-                lesson["miem_lecturer_email"] = (
-                    lesson["ruz_lecturer_email"].split("@")[0] + "@miem.hse.ru"
-                )
-
-            lessons.append(lesson)
+        if res.status == 200:
+            lessons = [await self.parse_lesson(class_) for class_ in data]
+        else:
+            lessons = []
 
         return lessons
+
+    @semlock
+    async def parse_lesson(self, lesson_ruz: dict) -> dict:
+        """ Changes json about lesson from RUZ to be Erudite friendly """
+
+        lesson = {}
+
+        date = lesson_ruz.pop("date")
+        date = date.split(".")
+        lesson["date"] = "-".join(date)
+
+        lesson["start_time"] = lesson_ruz.pop("beginLesson")
+        lesson["end_time"] = lesson_ruz.pop("endLesson")
+
+        lesson["summary"] = lesson_ruz["discipline"]
+        lesson["location"] = f"{lesson_ruz['auditorium']}/{lesson_ruz['building']}"
+
+        for key in lesson_ruz:
+            new_key = f"ruz_{camel_to_snake(key)}"
+            lesson[new_key] = lesson_ruz[key]
+
+        lesson["ruz_url"] = lesson["ruz_url1"]
+
+        if lesson["ruz_group"] is not None:
+            stream = lesson["ruz_group"].split("#")[0]
+            grp_emails = await self.nvr_api.get_course_emails(stream)
+            if grp_emails != []:
+                lesson[
+                    "grp_emails"
+                ] = []  # grp_emails !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+            else:
+                logger.warning(f"Stream: {stream} has no groups")
+        else:
+            stream = ""
+        lesson["course_code"] = stream
+
+        lesson["description"] = (
+            f"Поток: {stream}\n"
+            f"Преподаватель: {lesson['ruz_lecturer']}\n"
+            f"Тип занятия: {lesson['ruz_kind_of_work']}\n"
+        )
+
+        if lesson["ruz_url"]:
+            lesson["description"] += f"URL: {lesson['ruz_url']}\n"
+
+        if lesson.get("ruz_lecturer_email"):  # None or ""
+            lesson["miem_lecturer_email"] = (
+                lesson["ruz_lecturer_email"].split("@")[0] + "@miem.hse.ru"
+            )
+
+        return lesson

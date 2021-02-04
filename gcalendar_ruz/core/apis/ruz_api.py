@@ -88,9 +88,7 @@ class RuzApi:
             stream = lesson["ruz_group"].split("#")[0]
             grp_emails = await self.nvr_api.get_course_emails(stream)
             if grp_emails != []:
-                lesson[
-                    "grp_emails"
-                ] = []  # grp_emails !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+                lesson["grp_emails"] = grp_emails
             else:
                 logger.warning(f"Stream: {stream} has no groups")
         else:
